@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# settings & paths
+# displayupgraded
+# 0 - none
+# 1 - count
+# 2 - list
+declare -i displayupgraded=1
+# simulating user
+declare xuser=$(users)
+# workaround log path
+declare logpath="/home/$xuser/Downloads"
+# notification
+declare iconpath="/home/$xuser/.local/share/icons/hicolor/256x256"
+# getting packages from log
+declare syslogpath="/var/log/unattended-upgrades/unattended-upgrades.log"
+# other
+declare body from subject to msg icon
+declare -a posarg
+# notification message
+declare msg_title='Daily updates'
+declare msg_installed='All upgrades installed'
+declare msg_noupdates='No updates available.'
+declare msg_reboot='Reboot required.'
+declare msg_failed='Failed !'
+# notification message - cz
+# declare msg_title='Aktualizace'
+# declare msg_installed='Vše nainstalováno'
+# declare msg_noupdates='Nic nového.'
+# declare msg_reboot='Vyžadován restart.'
+# declare msg_failed='Chyba !'
+# mail sentences
+declare mb_installed='All upgrades installed'
+declare mb_noupdates='No packages found that can be upgraded'
+declare ms_success='SUCCESS'
+declare ms_reboot='reboot required'
+
+autoupgrade() {
+	declare line pkg pkgtext='Packages that will be upgraded:'
+	declare -i i linecnt=10	# last lines from log
+	declare -a lst
+
+	# check result, choose icon & build message
+	if [[ $body == *$mb_installed* ]]; then
+		msg="$msg_installed"
+		# get upgraded packages list from log
+		mapfile -t lst < <( tail -"$linecnt"l "$syslogpath" )
+
+		for (( i = linecnt - 1; i > 0; i-- )); do
+			line="${lst[$i]}"
+			if [[ $line == *$pkgtext* ]]; then
+				line="${line#*: }"
+				break
+			fi
+		done
+		lst=($line)
+		case $displayupgraded in
+			0)	msg+='.' ;;
+			1)	msg+=" (${#lst[@]})." ;;
+			2)	msg+=" ($line)." ;;
+		esac
+	elif [[ $body == *$mb_noupdates* ]]; then
+		msg="$msg_noupdates"
+	fi
+	# icon type & success
+	if [[ $subject == *$ms_success* ]]; then
+		icon="software-update"
+	else
+		icon="error"
+		msg="$msg_failed"
+	fi
+	# reboot needed
+	[[ $subject == *$ms_reboot* ]] && msg+=" $msg_reboot"
+}
+
+# process mail message
+read body
+# arguments
+while (($# > 0)); do
+	case $1 in
+		-r )	shift ; from=$1 ;;
+		-s )	shift ; subject=$1 ;;
+		*)		posarg+=("$1")
+	esac
+	shift
+done
+((${#posarg[@]})) && to="${posarg[0]}"
+
+# used for unattended upgrade notification
+autoupgrade
+
+# Notification (from ROOT)
+sudo -u $xuser DISPLAY=:0 DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u $xuser)/bus \
+	notify-send -t 15000 -i "$iconpath/$icon.png" "$msg_title" "$msg"
+
+# user Log - only workarround
+# printf 'From:\t%s\nTo:\t%s\nSubj:\t%s\nBody:\t%s\n' $from $to "$subject" "$body" > "$logpath/$(date +'%Y%m%d%H%M').au"
